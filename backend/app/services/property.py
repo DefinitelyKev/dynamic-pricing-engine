@@ -32,20 +32,36 @@ class PropertyService(BaseService[Property, PropertyCreate, PropertyUpdate]):
     def update_market_data(
         self, db: Session, *, property_id: int, market_data: MarketDataCreate
     ) -> Optional[MarketData]:
+        # First check if property exists
+        property = self.get(db, property_id)
+        if not property:
+            return None
+
+        # Check for existing market data
         db_market_data = db.query(MarketData).filter(MarketData.property_id == property_id).first()
 
         if db_market_data:
             # Update existing market data
-            for field, value in market_data.model_dump().items():
+            for field, value in market_data.model_dump(exclude={"property_id"}).items():
                 setattr(db_market_data, field, value)
         else:
-            # Create new market data
-            db_market_data = MarketData(**market_data.model_dump())
+            # Create new market data instance
+            db_market_data = MarketData(
+                property_id=property_id,
+                competitor_prices=market_data.competitor_prices,
+                vacancy_rates=market_data.vacancy_rates,
+                seasonal_factors=market_data.seasonal_factors,
+                local_events=market_data.local_events,
+            )
             db.add(db_market_data)
 
-        db.commit()
-        db.refresh(db_market_data)
-        return db_market_data
+        try:
+            db.commit()
+            db.refresh(db_market_data)
+            return db_market_data
+        except Exception as e:
+            db.rollback()
+            raise e
 
 
 property_service = PropertyService()

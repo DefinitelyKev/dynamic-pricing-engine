@@ -10,7 +10,7 @@ os.environ["TESTING"] = "1"
 # Import after setting TESTING environment
 from app.main import app
 from app.core.database import get_db
-from .test_db import test_db, db_session  # Import fixtures from test_db.py
+from .test_db import test_engine, db_session  # Import fixtures from test_db.py
 
 
 @pytest.fixture(scope="module")

@@ -1,106 +1,17 @@
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, close_all_sessions
-from sqlalchemy.pool import NullPool
-from sqlalchemy_utils import database_exists, create_database, drop_database
-from app.models.base import Base
-from app.models.property import Property, PriceHistory, MarketData
-from app.models.pricing import PricingRule
-from app.core.config import settings
-
-# Test database URL
-TEST_DATABASE_URL = f"{settings.DATABASE_URL}_test"
-
-
-def create_test_database():
-    """Create test database if it doesn't exist."""
-    try:
-        if not database_exists(TEST_DATABASE_URL):
-            create_database(TEST_DATABASE_URL)
-    except Exception as e:
-        print(f"Error creating database: {e}")
-        raise
-
-
-@pytest.fixture(scope="session")
-def test_engine():
-    """Create test database and tables."""
-    # Create the test database
-    create_test_database()
-
-    # Create engine with no connection pooling
-    engine = create_engine(
-        TEST_DATABASE_URL,
-        poolclass=NullPool,  # Disable connection pooling
-        isolation_level="AUTOCOMMIT",  # Allow database operations outside transactions
-    )
-
-    try:
-        # Create all tables
-        Base.metadata.drop_all(bind=engine)
-        Base.metadata.create_all(bind=engine)
-
-        yield engine
-
-    finally:
-        # Cleanup
-        try:
-            close_all_sessions()
-
-            # Drop all tables
-            Base.metadata.drop_all(bind=engine)
-
-            # Dispose of the engine
-            engine.dispose()
-
-            # Drop the test database
-            if database_exists(TEST_DATABASE_URL):
-                drop_database(TEST_DATABASE_URL)
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
-
-
-@pytest.fixture(scope="function")
-def db_session(test_engine):
-    """Create a fresh database session for a test."""
-    # Create a new connection
-    connection = test_engine.connect()
-
-    # Begin a non-ORM transaction
-    transaction = connection.begin()
-
-    # Create session
-    SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
-    session = SessionLocal()
-
-    try:
-        yield session
-    finally:
-        # Always rollback and close
-        try:
-            session.close()
-        except:
-            pass
-        try:
-            transaction.rollback()
-        except:
-            pass
-        try:
-            connection.close()
-        except:
-            pass
+from sqlalchemy import text
+from datetime import datetime
+from app.models import Property, PropertyEvent, School, PricingRule, Suburb
 
 
 def test_database_connection(db_session):
-    """Test that we can connect to the database."""
+    """Test database connection"""
     result = db_session.execute(text("SELECT 1"))
     assert result.scalar() == 1
-    print("Database connection test passed")
 
 
 def test_table_creation(db_session):
-    """Test that all tables were created."""
-    # Get list of all tables
+    """Test that all tables were created"""
     result = db_session.execute(
         text(
             """
@@ -111,29 +22,202 @@ def test_table_creation(db_session):
             """
         )
     )
-    tables = [row[0] for row in result]
-    print(f"Found tables: {tables}")
+    tables = {row[0] for row in result}
 
-    expected_tables = {"property", "pricingrule", "pricehistory", "marketdata"}
-    missing_tables = expected_tables - set(tables)
+    expected_tables = {
+        "property",
+        "propertyevent",
+        "school",
+        "pricingrule",
+        "priceadjustment",
+        "suburb",
+        "suburb_surroundings",
+    }
+
+    missing_tables = expected_tables - tables
     assert not missing_tables, f"Missing tables: {missing_tables}"
 
 
+def test_can_create_suburb(db_session):
+    """Test suburb creation"""
+    test_suburb = Suburb(
+        name="Test Suburb",
+        postcode="2000",
+        state="NSW",
+        properties_for_rent=100,
+        properties_for_sale=200,
+        sales_growth={},
+    )
+
+    db_session.add(test_suburb)
+    db_session.commit()
+
+    result = db_session.query(Suburb).filter_by(name="Test Suburb").first()
+    assert result is not None
+    assert result.postcode == "2000"
+    assert result.state == "NSW"
+
+
 def test_can_create_property(db_session):
-    """Test that we can create a property in the database."""
+    """Test property creation with relationships"""
+    # First create a suburb
+    suburb = Suburb(
+        name="Property Test Suburb",
+        postcode="2000",
+        state="NSW",
+        properties_for_rent=100,
+        properties_for_sale=200,
+        sales_growth={},
+    )
+    db_session.add(suburb)
+    db_session.flush()
+
+    # Create property with a unique ID
     test_property = Property(
-        name="Test Property",
-        address="123 Test St",
-        square_footage=1000.0,
-        bedrooms=2,
-        bathrooms=2.0,
-        amenities={"parking": True},
-        current_price=1500.0,
+        id=1001,  # Unique ID
+        property_id="TEST-1001",
+        type="House",
+        category="Residential",
+        suburb_id=suburb.id,
+        bedrooms=3,
+        bathrooms=2,
+        display_address="123 Test Street",
+        postcode="2000",
+        suburb_name="Property Test Suburb",
+        state="NSW",
+        street_number="123",
+        street_name="Test",
+        street_type="Street",
+        market_stats={},
+        listing_url="https://example.com/property1",
+        listing_status="Active",
+        listing_type="Sale",
+        display_price="$1,000,000",
+        images=[],
+        suburb_insights={},
     )
 
     db_session.add(test_property)
     db_session.commit()
 
-    result = db_session.query(Property).filter_by(name="Test Property").first()
+    result = db_session.query(Property).filter_by(property_id="TEST-1001").first()
     assert result is not None
-    assert result.address == "123 Test St"
+    assert result.type == "House"
+    assert result.suburb.name == "Property Test Suburb"
+
+
+def test_can_create_property_event(db_session):
+    """Test property event creation"""
+    # Create suburb and property first
+    suburb = Suburb(
+        name="Event Test Suburb",
+        postcode="2000",
+        state="NSW",
+        properties_for_rent=100,
+        properties_for_sale=200,
+        sales_growth={},
+    )
+    db_session.add(suburb)
+    db_session.flush()
+
+    property = Property(
+        id=1002,  # Different unique ID
+        property_id="TEST-1002",
+        type="House",
+        category="Residential",
+        suburb_id=suburb.id,
+        display_address="124 Test Street",
+        postcode="2000",
+        suburb_name="Event Test Suburb",
+        state="NSW",
+        street_number="124",
+        street_name="Test",
+        street_type="Street",
+        market_stats={},
+        listing_url="https://example.com/property2",
+        listing_status="Active",
+        listing_type="Sale",
+        display_price="$1,000,000",
+        images=[],
+        suburb_insights={},
+    )
+    db_session.add(property)
+    db_session.flush()
+
+    # Create property event
+    event = PropertyEvent(
+        property_id=property.id,
+        event_price=1000000.0,
+        event_date="2025-02-03",
+        category="PRICE_CHANGE",
+        days_on_market=30,
+        price_description="Price Reduced",
+    )
+
+    db_session.add(event)
+    db_session.commit()
+
+    result = db_session.query(PropertyEvent).filter_by(property_id=property.id).first()
+    assert result is not None
+    assert result.event_price == 1000000.0
+    assert result.category == "PRICE_CHANGE"
+
+
+def test_can_create_school(db_session):
+    """Test school creation with relationships"""
+    # Create suburb and property first
+    suburb = Suburb(
+        name="School Test Suburb",
+        postcode="2000",
+        state="NSW",
+        properties_for_rent=100,
+        properties_for_sale=200,
+        sales_growth={},
+    )
+    db_session.add(suburb)
+    db_session.flush()
+
+    property = Property(
+        id=1003,  # Another unique ID
+        property_id="TEST-1003",
+        type="House",
+        category="Residential",
+        suburb_id=suburb.id,
+        display_address="125 Test Street",
+        postcode="2000",
+        suburb_name="School Test Suburb",
+        state="NSW",
+        street_number="125",
+        street_name="Test",
+        street_type="Street",
+        market_stats={},
+        listing_url="https://example.com/property3",
+        listing_status="Active",
+        listing_type="Sale",
+        display_price="$1,000,000",
+        images=[],
+        suburb_insights={},
+    )
+    db_session.add(property)
+    db_session.flush()
+
+    # Create school
+    school = School(
+        property_id=property.id,
+        suburb_id=suburb.id,
+        name="Test School",
+        type="Primary",
+        sector="Public",
+        gender="Co-ed",
+        distance=1.5,
+        year_range="K-6",
+    )
+
+    db_session.add(school)
+    db_session.commit()
+
+    result = db_session.query(School).filter_by(name="Test School").first()
+    assert result is not None
+    assert result.distance == 1.5
+    assert result.property.property_id == "TEST-1003"
+    assert result.suburb_rel.name == "School Test Suburb"

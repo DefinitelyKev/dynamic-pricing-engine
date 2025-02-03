@@ -6,6 +6,9 @@ __pycache__/
 .Python
 venv/
 ENV/
+.pytest_cache
+pytest.ini
+_data
 
 # Environment variables
 .env

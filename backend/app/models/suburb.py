@@ -18,17 +18,12 @@ class Suburb(BaseModel):
     region: Mapped[str] = mapped_column(String, nullable=True)
     area: Mapped[str] = mapped_column(String, nullable=True)
 
-    # Geographic data
-    latitude: Mapped[float] = mapped_column(Float, nullable=True)
-    longitude: Mapped[float] = mapped_column(Float, nullable=True)
-
     # Market statistics
     properties_for_rent: Mapped[int] = mapped_column(Integer, default=0)
     properties_for_sale: Mapped[int] = mapped_column(Integer, default=0)
     median_price: Mapped[float] = mapped_column(Float, nullable=True)
     median_rent: Mapped[float] = mapped_column(Float, nullable=True)
     avg_days_on_market: Mapped[float] = mapped_column(Float, nullable=True)
-    auction_clearance_rate: Mapped[float] = mapped_column(Float, nullable=True)
 
     # Demographics
     population: Mapped[int] = mapped_column(Integer, nullable=True)

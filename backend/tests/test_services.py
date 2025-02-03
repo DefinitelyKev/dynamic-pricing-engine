@@ -24,7 +24,6 @@ def create_test_suburb(db_session) -> Suburb:
         median_price=1500000.0,
         median_rent=750.0,
         avg_days_on_market=30.0,
-        auction_clearance_rate=75.0,
         entry_price=1000000.0,
         luxury_price=3000000.0,
         sales_growth={},

@@ -71,7 +71,6 @@ def create_suburb_from_property_data(db: Session, property_data: Dict[str, Any],
             median_price=suburb_insights.get("medianPrice"),
             median_rent=suburb_insights.get("medianRentPrice"),
             avg_days_on_market=suburb_insights.get("avgDaysOnMarket"),
-            auction_clearance_rate=suburb_insights.get("auctionClearance"),
             entry_price=suburb_insights.get("entryLevelPrice"),
             luxury_price=suburb_insights.get("luxuryLevelPrice"),
             # Sales growth data

@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 class Property(BaseModel):
     """Property model matching the domain.com.au data structure"""
 
-    # Override id to use listing id
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # This will be the listing ID
+    # Override id to use listing id. This will be the listing ID
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=False)
     property_id: Mapped[str] = mapped_column(String, index=True)  # e.g., "YG-2324-HR"
     type: Mapped[str] = mapped_column(String)
     category: Mapped[str] = mapped_column(String)
@@ -73,7 +73,6 @@ class Property(BaseModel):
 class PropertyEvent(BaseModel):
     """Model for property timeline events (sales, rentals)"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     property_id: Mapped[int] = mapped_column(Integer, ForeignKey("property.id"))
     event_price: Mapped[float] = mapped_column(Float)
     event_date: Mapped[str] = mapped_column(String)
@@ -88,7 +87,6 @@ class PropertyEvent(BaseModel):
 class School(BaseModel):
     """Model for nearby schools"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     property_id: Mapped[int] = mapped_column(Integer, ForeignKey("property.id"))
     suburb_id: Mapped[int] = mapped_column(Integer, ForeignKey("suburb.id"))
     name: Mapped[str] = mapped_column(String)

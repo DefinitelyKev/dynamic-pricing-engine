@@ -1,6 +1,15 @@
-from .base import Base
-from .property import Property, PriceHistory, MarketData
-from .pricing import PricingRule
+from .base import Base, BaseModel
+from .property import Property, PropertyEvent, School
+from .pricing import PricingRule, PriceAdjustment
+from .suburb import Suburb
 
-# This ensures all models are registered with Base.metadata
-__all__ = ["Base", "Property", "PriceHistory", "MarketData", "PricingRule"]
+__all__ = [
+    "Base",
+    "BaseModel",
+    "Property",
+    "PropertyEvent",
+    "School",
+    "PricingRule",
+    "PriceAdjustment",
+    "Suburb",
+]

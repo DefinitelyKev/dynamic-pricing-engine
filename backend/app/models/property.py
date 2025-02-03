@@ -94,9 +94,9 @@ class School(BaseModel):
     name: Mapped[str] = mapped_column(String)
     type: Mapped[str] = mapped_column(String)
     sector: Mapped[str] = mapped_column(String)
-    gender: Mapped[str] = mapped_column(String)
+    gender: Mapped[str] = mapped_column(String, nullable=True, default="Unknown")
     distance: Mapped[float] = mapped_column(Float)
-    year_range: Mapped[str] = mapped_column(String)
+    year_range: Mapped[str] = mapped_column(String, nullable=True, default="Not Specified")
 
     property: Mapped[Property] = relationship("Property", back_populates="schools")
     suburb_rel: Mapped[Suburb] = relationship("Suburb", back_populates="schools")

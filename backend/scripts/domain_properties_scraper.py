@@ -4,14 +4,11 @@ import jmespath
 from httpx import AsyncClient, Response
 from parsel import Selector
 from typing import List, Dict, Optional
-import time
 import os
-import pandas as pd
 
 client = AsyncClient(
     # enable http2
     http2=True,
-    # add basic browser headers to minimize blocking chances
     headers={
         "accept-language": "en-US,en;q=0.9",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
@@ -62,34 +59,27 @@ def parse_property_page(data: Dict) -> Optional[Dict]:
         parking: listingSummary.parking,
         price: listingSummary.title,
         listingSummary: listingSummary,
-        phone: phone,
-        agencyName: agencyName,
-        propertyDeveloperName: propertyDeveloperName,
-        agencyProfileUrl: agencyProfileUrl,
-        propertyDeveloperUrl: propertyDeveloperUrl,
         loanfinder: loanfinder,
-        agents: agents,
         features: features,
         structuredFeatures: structuredFeatures,
-        schools: schoolCatchment.schools,
         suburbInsights: suburbInsights,
-        gallery: gallery,
-        faqs: faqs
+        schools: schoolCatchment.schools,
+        gallery: gallery
         }""",
             data,
         )
 
-        # Limit gallery slides to maximum 5 entries and modify image structure
+        # Limit gallery slides to maximum 5 entries and keep only image urls
         if result and "gallery" in result and "slides" in result["gallery"]:
             slides = result["gallery"]["slides"][:5]  # Limit to 5 slides
 
-            # Modify each slide to only keep original image
+            image_urls = []
             for slide in slides:
                 if "images" in slide:
                     original = slide["images"].get("original", {})
-                    slide["images"] = {"original": original}
+                    image_urls.append(original.get("url", ""))
 
-            result["gallery"]["slides"] = slides
+            result["gallery"] = image_urls
 
         return result
     except Exception as e:
@@ -114,7 +104,7 @@ def load_existing_data() -> Dict:
     if os.path.exists("domain_properties.json"):
         with open("domain_properties.json", "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"properties": [], "completed_suburbs": [], "last_suburb": None, "last_page": 1}
+    return {"properties": [], "completed_price_ranges": []}
 
 
 def save_to_json(data: Dict):
@@ -123,23 +113,21 @@ def save_to_json(data: Dict):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def has_more_pages(data: Dict) -> bool:
+def has_more_pages(data: Dict, page: int) -> bool:
     """Check if there are more pages of results"""
+
+    PROPERTIES_PER_PAGE = 20
     try:
-        total_results = data.get("totalResults", 0)
-        current_page = data.get("page", 1)
-        results_per_page = len(data.get("listingsMap", {}))
+        # Getting total pages by ceiling property count division
+        property_count = sum(data["propertyCounts"].values())
+        return page <= -(property_count // -PROPERTIES_PER_PAGE)
 
-        if results_per_page == 0:
-            return False
-
-        return (current_page * results_per_page) < total_results
     except Exception as e:
         print(f"Error checking for more pages: {e}")
         return False
 
 
-async def scrape_properties_for_page(property_urls: List[str], batch_size: int = 10) -> List[Dict]:
+async def scrape_properties_for_page(property_urls: List[str], batch_size: int = 20) -> List[Dict]:
     """Scrape detailed property data for a single page's worth of properties"""
     page_properties = []
 
@@ -156,18 +144,10 @@ async def scrape_properties_for_page(property_urls: List[str], batch_size: int =
                     if property_data:
                         property_data["scraped_url"] = url
                         page_properties.append(property_data)
-                        print(f"\nSuccessfully scraped property:")
-                        print(f"URL: {url}")
-                        print(
-                            f"Address: {property_data.get('streetNumber', '')} {property_data.get('street', '')}, {property_data.get('suburb', '')}"
-                        )
-                        print(f"Details: {property_data.get('beds', '')} beds, {property_data.get('baths', '')} baths")
-                        print(f"Price: {property_data.get('price', 'Not specified')}")
-                        print("-" * 50)
                 else:
                     print(f"Failed to fetch property {url}: Status {response.status_code}")
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
         except Exception as e:
             print(f"Error processing batch: {e}")
@@ -176,84 +156,66 @@ async def scrape_properties_for_page(property_urls: List[str], batch_size: int =
     return page_properties
 
 
-async def process_suburb(suburb: str, existing_data: Dict) -> None:
+async def process_price_range(low_price: str, high_price: str, existing_data: Dict) -> None:
     """Process all pages for a single suburb"""
-    base_url = f"https://www.domain.com.au/sale/{suburb}/?ptype=apartment-unit-flat,block-of-units,duplex,free-standing,new-apartments,new-home-designs,new-house-land,pent-house,semi-detached,studio,terrace,town-house,villa&establishedtype=established&ssubs=0"
+    base_url = f"https://www.domain.com.au/sale/?ptype=house&price={low_price}-{high_price}&establishedtype=established&ssubs=0&sort=price-asc&state=nsw"
 
     page = 1
-    if existing_data["last_suburb"] == suburb:
-        page = existing_data["last_page"]
-        print(f"Resuming {suburb} from page {page}")
-
     while True:
         url = f"{base_url}&page={page}"
-        print(f"\nProcessing {suburb} - Page {page}")
+        print(f"\nProcessing ${low_price} - ${high_price} - Page {page}")
 
         try:
             response = await client.get(url)
             if response.status_code != 200:
-                print(f"Failed to fetch page {page} for {suburb}: Status {response.status_code}")
+                print(f"Failed to fetch page {page} for ${low_price} - ${high_price}: Status {response.status_code}")
                 break
 
             data = parse_hidden_data(response)
             search_results = parse_search_page(data)
 
             if not search_results:
-                print(f"No properties found on page {page} for {suburb}")
+                print(f"No properties found on page {page} for range ${low_price} - ${high_price}")
                 break
 
-            property_urls = [item["propertyUrl"] for item in search_results]
-
             # Filter out already scraped URLs
+            property_urls = [item["propertyUrl"] for item in search_results]
             existing_urls = {prop.get("scraped_url") for prop in existing_data["properties"]}
             new_urls = [url for url in property_urls if url not in existing_urls]
 
             if new_urls:
                 page_properties = await scrape_properties_for_page(new_urls)
                 existing_data["properties"].extend(page_properties)
-                existing_data["last_suburb"] = suburb
-                existing_data["last_page"] = page
                 save_to_json(existing_data)
-                print(f"Saved {len(page_properties)} new properties for {suburb} - Page {page}")
-
-            if not has_more_pages(data):
-                print(f"No more pages for {suburb}")
-                break
+                print(f"Saved {len(page_properties)} new properties for range ${low_price} - ${high_price}")
 
             page += 1
-            await asyncio.sleep(2)  # Delay between pages
+
+            if not has_more_pages(data, page):
+                print(f"No more pages for range ${low_price} - ${high_price}")
+                break
+
+            await asyncio.sleep(1)  # Delay between pages
 
         except Exception as e:
-            print(f"Error processing page {page} for {suburb}: {e}")
+            print(f"Error processing page {page} for range ${low_price} - ${high_price}: {e}")
             break
 
-    existing_data["completed_suburbs"].append(suburb)
-    existing_data["last_suburb"] = None
-    existing_data["last_page"] = 1
+    existing_data["completed_price_ranges"].append(f"{low_price}-{high_price}")
     save_to_json(existing_data)
 
 
 async def run():
     try:
-        # Load suburbs from CSV
-        suburbs_df = pd.read_csv("nsw_suburbs.csv")
-        suburbs = suburbs_df["suburb"].tolist()
-
-        # Load existing data
         existing_data = load_existing_data()
 
-        # Filter out already completed suburbs
-        remaining_suburbs = [s for s in suburbs if s not in existing_data["completed_suburbs"]]
+        low_price = 0
+        for high_price in range(50000, 12000000, 50000):
+            await process_price_range(str(low_price), str(high_price), existing_data)
+            low_price = high_price
+            await asyncio.sleep(1)
 
-        print(f"Starting scrape for {len(remaining_suburbs)} suburbs")
-
-        for suburb in remaining_suburbs:
-            print(f"\nStarting new suburb: {suburb}")
-            await process_suburb(suburb, existing_data)
-            print(f"Completed suburb: {suburb}")
-            await asyncio.sleep(2)  # Delay between suburbs
-
-        print(f"\nFinished scraping all suburbs. Total properties: {len(existing_data['properties'])}")
+        print(f"\nFinished scraping all properties. Total properties: {len(existing_data['properties'])}")
 
     except Exception as e:
         print(f"An error occurred: {e}")

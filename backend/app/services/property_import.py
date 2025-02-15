@@ -7,18 +7,6 @@ from app.schemas.property import PropertyCreate, PropertyEventCreate, SchoolCrea
 
 
 class PropertyImportService:
-    def extract_listing_id_from_url(self, url: str) -> Optional[int]:
-        """Extract listing ID from the URL"""
-        try:
-            # Extract the last part of the URL before any query parameters
-            url_path = url.split("?")[0]
-            # Get the last segment that contains the ID
-            last_segment = url_path.rstrip("/").split("-")[-1]
-            # Convert to integer
-            return int(last_segment)
-        except (IndexError, ValueError):
-            return None
-
     def transform_property_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Transform raw JSON data to match our schema structure"""
 
@@ -53,9 +41,31 @@ class PropertyImportService:
             "state": data.get("state", ""),
             # Additional data
             "images": data.get("images", []),
+            "schools": data.get("schools"),
         }
 
         return {k: v for k, v in transformed.items() if v is not None}
+
+    def create_schools_from_property_data(self, db: Session, property_data: Dict[str, Any]) -> None:
+        for school_data in property_data["schools"]:
+            school_id = property_data.get("id")
+            if not school_id:
+                continue
+
+            existing_school = db.query(School).filter(School.id == school_id).first()
+            if existing_school:
+                continue
+
+            school = School(
+                school_id=school_id,
+                suburb_id=property_data.get("suburb_id"),
+                name=school_data.get("name", "Unknown School"),
+                education_level=school_data.get("educationLevel", "Not Specified"),
+                year_range=school_data.get("year", "Not Specified"),
+                type=school_data.get("type", "Not Specified"),
+                gender=school_data.get("gender", "Unknown"),
+            )
+            db.add(school)
 
     def create_property_with_relations(self, db: Session, property_data: Dict[str, Any]) -> Optional[Property]:
         """Create a property with all its related data"""
@@ -89,18 +99,7 @@ class PropertyImportService:
 
             # Create schools
             if "schools" in property_data:
-                for school_data in property_data["schools"]:
-                    school = School(
-                        property_id=db_property.id,
-                        suburb_id=property_data["suburb_id"],
-                        name=school_data.get("name", "Unknown School"),
-                        type=school_data.get("type", "Not Specified"),
-                        sector=school_data.get("sector", "Not Specified"),
-                        gender=school_data.get("gender", "Unknown"),
-                        distance=school_data.get("distance", 0.0),
-                        year_range=school_data.get("yearRange", "Not Specified"),
-                    )
-                    db.add(school)
+                self.create_schools_from_property_data(db, property_data)
 
             return db_property
 

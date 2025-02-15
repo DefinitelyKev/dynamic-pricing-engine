@@ -19,69 +19,40 @@ class PropertyImportService:
         except (IndexError, ValueError):
             return None
 
-    def transform_property_data(self, raw_data: Dict[str, Any], suburb_id: int) -> Dict[str, Any]:
+    def transform_property_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Transform raw JSON data to match our schema structure"""
 
         # Get specifications safely
-        specs = raw_data.get("specifications", {})
-        # Get address safely
-        address = raw_data.get("address", {})
-        # Get listing safely with defaults
-        listing = raw_data.get("listing", {})
-
-        # Get listing URL and ID from original_listing_url if not in listing object
-        original_url = raw_data.get("original_listing_url")
-        listing_url = listing.get("url")
-        listing_id = listing.get("id")
-
-        if original_url:
-            if not listing_url:
-                listing_url = original_url
-            if not listing_id:
-                listing_id = self.extract_listing_id_from_url(original_url)
+        listing_summary = data.get("listingSummary", {})
 
         transformed = {
             # Required fields with defaults
-            "id": (
-                listing_id or self.extract_listing_id_from_url(listing_url)
-                if listing_url
-                else int(raw_data["propertyId"].replace("-", ""))
-            ),
-            "property_id": raw_data.get("propertyId", "UNKNOWN"),
-            "type": raw_data.get("type", "Unknown"),
-            "category": raw_data.get("category", "Unknown"),
-            "suburb_id": suburb_id,
+            "id": data.get("listingId"),
+            "type": data.get("propertyType", "Unknown"),
+            "suburb_id": data.get("suburb_id"),
+            # Listing Details
+            "display_price": data.get("displayPrice", "Price not provided"),
+            "listing_status": listing_summary.get("status", "N/A"),
+            "listing_mode": data.get("mode", "N/A"),
+            "listing_method": data.get("method", "N/A"),
+            "listing_url": data.get("listingUrl"),
             # Specifications
-            "bedrooms": specs.get("bedrooms"),
-            "bathrooms": specs.get("bathrooms"),
-            "parking_spaces": specs.get("parkingSpaces"),
-            "internal_area": specs.get("internal_area"),
-            "land_area": specs.get("land_area"),
+            "bedrooms": data.get("beds"),
+            "bathrooms": data.get("baths"),
+            "parking_spaces": data.get("parking"),
+            "area_stats": listing_summary.get("stats"),
+            "features": data.get("features"),
+            "structured_features": data.get("structuredFeatures"),
             # Address
-            "display_address": address.get("displayAddress", "No address provided"),
-            "postcode": address.get("postcode", ""),
-            "suburb_name": address.get("suburbName", ""),
-            "state": address.get("state", ""),
-            "unit_number": address.get("unitNumber"),
-            "street_number": address.get("streetNumber", ""),
-            "street_name": address.get("streetName", ""),
-            "street_type": address.get("streetType", ""),
-            "latitude": address.get("geolocation", {}).get("latitude"),
-            "longitude": address.get("geolocation", {}).get("longitude"),
-            # Location details
-            "region": raw_data.get("location", {}).get("suburb", {}).get("region"),
-            "area": raw_data.get("location", {}).get("suburb", {}).get("area"),
-            # Required listing fields with defaults
-            "listing_url": listing_url
-            or original_url
-            or f"https://example.com/property/{raw_data.get('propertyId', 'unknown')}",
-            "listing_status": listing.get("status") or "UNKNOWN",
-            "listing_type": listing.get("type") or "UNKNOWN",
-            "display_price": listing.get("displayPrice") or "Price not provided",
+            "address": listing_summary.get("address", "N/A"),
+            "unit_number": data.get("unitNumber"),
+            "street_number": data.get("streetNumber", ""),
+            "street_name": data.get("street", ""),
+            "suburb_name": data.get("suburb", ""),
+            "postcode": data.get("postcode", ""),
+            "state": data.get("state", ""),
             # Additional data
-            "market_stats": raw_data.get("marketStats", {}),
-            "images": raw_data.get("images", []),
-            "suburb_insights": raw_data.get("suburbInsights", {}),
+            "images": data.get("images", []),
         }
 
         return {k: v for k, v in transformed.items() if v is not None}
@@ -94,7 +65,7 @@ class PropertyImportService:
 
         try:
             # Check if property already exists
-            listing_id = property_data.get("listing", {}).get("id")
+            listing_id = property_data.get("listingId")
             if listing_id:
                 existing_property = db.query(Property).filter(Property.id == listing_id).first()
                 if existing_property:
@@ -102,7 +73,7 @@ class PropertyImportService:
                     return existing_property
 
             # Transform the raw data
-            transformed_data = self.transform_property_data(property_data, property_data["suburb_id"])
+            transformed_data = self.transform_property_data(property_data)
 
             # Create the main property
             property_create = PropertyCreate(**transformed_data)
@@ -115,25 +86,6 @@ class PropertyImportService:
                 db.rollback()
                 print(f"IntegrityError for property {transformed_data.get('property_id')}: {str(e)}")
                 return None
-
-            # Create timeline events
-            if "timeline" in property_data:
-                for event_data in property_data["timeline"]:
-                    try:
-                        event_price = float(str(event_data.get("eventPrice", "0")).replace(",", ""))
-                    except (ValueError, TypeError):
-                        event_price = 0.0
-
-                    event = PropertyEvent(
-                        property_id=db_property.id,
-                        event_price=event_price,
-                        event_date=event_data.get("eventDate", ""),
-                        agency=event_data.get("agency"),
-                        category=event_data.get("category", ""),
-                        days_on_market=event_data.get("daysOnMarket", 0),
-                        price_description=event_data.get("priceDescription", ""),
-                    )
-                    db.add(event)
 
             # Create schools
             if "schools" in property_data:

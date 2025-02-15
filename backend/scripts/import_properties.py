@@ -17,17 +17,15 @@ def create_suburb_from_property_data(db: Session, property_data: Dict[str, Any],
     """Create a suburb if it doesn't exist and return it"""
 
     # Extract suburb data from property
-    location = property_data.get("location", {})
-    suburb_info = location.get("suburb", {})
-
-    if not suburb_info:
-        raise ValueError("No suburb information found in property data")
-
-    suburb_name = suburb_info.get("name")
-    suburb_postcode = suburb_info.get("postcode")
+    suburb_name = property_data.get("suburb")
+    suburb_postcode = property_data.get("postcode")
+    suburb_insights = property_data.get("suburbInsights", {})
 
     if not suburb_name or not suburb_postcode:
         raise ValueError("Missing required suburb information (name or postcode)")
+
+    if not suburb_insights:
+        raise ValueError("No suburb information found in property data")
 
     # Create suburb key for tracking
     suburb_key = f"{suburb_name}-{suburb_postcode}"
@@ -36,12 +34,6 @@ def create_suburb_from_property_data(db: Session, property_data: Dict[str, Any],
     suburb = db.query(Suburb).filter_by(name=suburb_name, postcode=suburb_postcode).first()
 
     if not suburb:
-        # Get market stats safely
-        market_stats = property_data.get("marketStats", {})
-        houses_stats = market_stats.get("houses", {})
-        units_stats = market_stats.get("apartmentsAndUnits", {})
-        townhouse_stats = market_stats.get("townhouses", {})
-
         # Get suburb insights safely
         suburb_insights = property_data.get("suburbInsights", {})
         demographics = suburb_insights.get("demographics", {})
@@ -50,16 +42,8 @@ def create_suburb_from_property_data(db: Session, property_data: Dict[str, Any],
         suburb = Suburb(
             name=suburb_name,
             postcode=suburb_postcode,
-            state=suburb_info.get("state"),
-            region=suburb_info.get("region"),
-            area=suburb_info.get("area"),
-            # Market statistics
-            properties_for_rent=(
-                houses_stats.get("forRent", 0) + units_stats.get("forRent", 0) + townhouse_stats.get("forRent", 0)
-            ),
-            properties_for_sale=(
-                houses_stats.get("forSale", 0) + units_stats.get("forSale", 0) + townhouse_stats.get("forSale", 0)
-            ),
+            state=suburb_insights.get("state"),
+            suburb_profile_url=suburb_insights.get("suburbProfileUrl"),
             # Demographics
             population=demographics.get("population"),
             avg_age_range=demographics.get("avgAge"),
@@ -93,14 +77,10 @@ async def import_properties(file_path: str):
     created_suburbs = set()  # Track unique suburbs created
 
     try:
-        print("Starting property import...")
-
         # Read the JSON file
         with open(file_path, "r") as f:
             data = json.load(f)
             properties_data = data.get("properties", [])
-
-        print(f"Found {len(properties_data)} properties to import")
 
         # Track statistics
         stats = {"suburbs_created": 0, "properties_imported": 0, "schools_added": 0, "errors": []}

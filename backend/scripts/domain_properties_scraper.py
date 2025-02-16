@@ -84,6 +84,16 @@ def parse_property_page(data: Dict) -> Optional[Dict]:
 
             result["gallery"] = image_urls
 
+        if result and "listingSummary" in result and "stats" in result["listingSummary"]:
+            stats = result["listingSummary"]["stats"]
+
+            land_area_value = 0
+            for stat in stats:
+                if "landArea" in stat.values():
+                    land_area_value = stat["value"]
+
+            result["listingSummary"]["stats"] = land_area_value
+
         return result
     except Exception as e:
         print(f"Error parsing property page: {e}")

@@ -1,9 +1,9 @@
-import json
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from app.models.property import Property, PropertyEvent, School
-from app.schemas.property import PropertyCreate, PropertyEventCreate, SchoolCreate
+from app.models.property import Property, School, property_school
+
+# from app.schemas.property import PropertyCreate, SchoolCreate
 
 
 class PropertyImportService:
@@ -16,29 +16,29 @@ class PropertyImportService:
         transformed = {
             # Required fields with defaults
             "id": data.get("listingId"),
-            "type": data.get("propertyType", "Unknown"),
+            "type": data.get("propertyType"),
             "suburb_id": data.get("suburb_id"),
             # Listing Details
-            "display_price": data.get("displayPrice", "Price not provided"),
-            "listing_status": listing_summary.get("status", "N/A"),
-            "listing_mode": data.get("mode", "N/A"),
-            "listing_method": data.get("method", "N/A"),
+            "display_price": data.get("displayPrice"),
+            "listing_status": listing_summary.get("status"),
+            "listing_mode": data.get("mode"),
+            "listing_method": data.get("method"),
             "listing_url": data.get("listingUrl"),
             # Specifications
-            "bedrooms": data.get("beds"),
-            "bathrooms": data.get("baths"),
-            "parking_spaces": data.get("parking"),
-            "area_stats": listing_summary.get("stats"),
+            "bedrooms": data.get("beds", 0),
+            "bathrooms": data.get("baths", 0),
+            "parking_spaces": data.get("parking", 0),
+            "land_area": listing_summary.get("stats", 0),
             "features": data.get("features"),
             "structured_features": data.get("structuredFeatures"),
             # Address
-            "address": listing_summary.get("address", "N/A"),
+            "address": listing_summary.get("address"),
             "unit_number": data.get("unitNumber"),
-            "street_number": data.get("streetNumber", ""),
-            "street_name": data.get("street", ""),
-            "suburb_name": data.get("suburb", ""),
-            "postcode": data.get("postcode", ""),
-            "state": data.get("state", ""),
+            "street_number": data.get("streetNumber"),
+            "street_name": data.get("street"),
+            "suburb_name": data.get("suburb"),
+            "postcode": data.get("postcode"),
+            "state": data.get("state"),
             # Additional data
             "images": data.get("images", []),
             "schools": data.get("schools"),
@@ -46,26 +46,35 @@ class PropertyImportService:
 
         return {k: v for k, v in transformed.items() if v is not None}
 
-    def create_schools_from_property_data(self, db: Session, property_data: Dict[str, Any]) -> None:
-        for school_data in property_data["schools"]:
-            school_id = property_data.get("id")
-            if not school_id:
-                continue
+    def create_or_get_school(self, db: Session, school_data: Dict[str, Any]) -> Optional[School]:
+        school_id = school_data.get("id")
+        if not school_id:
+            return None
 
-            existing_school = db.query(School).filter(School.id == school_id).first()
-            if existing_school:
-                continue
+        school_id = int(school_id)
 
-            school = School(
-                school_id=school_id,
-                suburb_id=property_data.get("suburb_id"),
-                name=school_data.get("name", "Unknown School"),
-                education_level=school_data.get("educationLevel", "Not Specified"),
-                year_range=school_data.get("year", "Not Specified"),
-                type=school_data.get("type", "Not Specified"),
-                gender=school_data.get("gender", "Unknown"),
-            )
+        existing_school = db.query(School).filter(School.id == school_id).first()
+        if existing_school:
+            return existing_school
+
+        school = School(
+            id=school_id,
+            name=school_data.get("name"),
+            education_level=school_data.get("educationLevel"),
+            year_range=school_data.get("year"),
+            type=school_data.get("type"),
+            gender=school_data.get("gender"),
+            state=school_data.get("state"),
+            postcode=school_data.get("postCode"),
+            suburb_id=school_data.get("suburb_id"),
+        )
+        try:
             db.add(school)
+            db.flush()
+            return school
+        except IntegrityError:
+            db.rollback()
+            return None
 
     def create_property_with_relations(self, db: Session, property_data: Dict[str, Any]) -> Optional[Property]:
         """Create a property with all its related data"""
@@ -86,8 +95,7 @@ class PropertyImportService:
             transformed_data = self.transform_property_data(property_data)
 
             # Create the main property
-            property_create = PropertyCreate(**transformed_data)
-            db_property = Property(**property_create.model_dump(exclude_none=True))
+            db_property = Property(**transformed_data)
 
             try:
                 db.add(db_property)
@@ -99,7 +107,18 @@ class PropertyImportService:
 
             # Create schools
             if "schools" in property_data:
-                self.create_schools_from_property_data(db, property_data)
+                for school_data in property_data["schools"]:
+                    school_data["suburb_id"] = property_data["suburb_id"]
+
+                    # Create or get school
+                    school = self.create_or_get_school(db, school_data)
+                    if school:
+                        # Create association with distance
+                        distance = school_data.get("distance")
+                        stmt = property_school.insert().values(
+                            property_id=db_property.id, school_id=school.id, distance=distance
+                        )
+                        db.execute(stmt)
 
             return db_property
 

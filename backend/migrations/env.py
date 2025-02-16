@@ -8,7 +8,6 @@ from alembic import context
 # Import your models and Base
 from app.models.base import Base
 import app.models.property
-import app.models.pricing
 from app.core.config import settings  # Add this import
 
 # this is the Alembic Config object, which provides

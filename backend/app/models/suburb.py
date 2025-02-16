@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, List
-from sqlalchemy import String, Float, Integer, JSON, ForeignKey
+from typing import TYPE_CHECKING, List, Dict, Any
+from sqlalchemy import String, Float, Integer, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import BaseModel
 
@@ -15,15 +16,7 @@ class Suburb(BaseModel):
     name: Mapped[str] = mapped_column(String, index=True)
     postcode: Mapped[str] = mapped_column(String, index=True)
     state: Mapped[str] = mapped_column(String)
-    region: Mapped[str] = mapped_column(String, nullable=True)
-    area: Mapped[str] = mapped_column(String, nullable=True)
-
-    # Market statistics
-    properties_for_rent: Mapped[int] = mapped_column(Integer, default=0)
-    properties_for_sale: Mapped[int] = mapped_column(Integer, default=0)
-    median_price: Mapped[float] = mapped_column(Float, nullable=True)
-    median_rent: Mapped[float] = mapped_column(Float, nullable=True)
-    avg_days_on_market: Mapped[float] = mapped_column(Float, nullable=True)
+    suburb_profile_url: Mapped[str] = mapped_column(String, unique=True)
 
     # Demographics
     population: Mapped[int] = mapped_column(Integer, nullable=True)
@@ -34,31 +27,13 @@ class Suburb(BaseModel):
     single_percentage: Mapped[float] = mapped_column(Float, nullable=True)
 
     # Additional insights
+    median_price: Mapped[float] = mapped_column(Float, nullable=True)
+    median_rent: Mapped[float] = mapped_column(Float, nullable=True)
+    avg_days_on_market: Mapped[float] = mapped_column(Float, nullable=True)
     entry_price: Mapped[float] = mapped_column(Float, nullable=True)
     luxury_price: Mapped[float] = mapped_column(Float, nullable=True)
-    sales_growth: Mapped[dict] = mapped_column(JSON, default={})
+    sales_growth: Mapped[Mapped[List[Dict[str, Any]]]] = mapped_column(JSONB, default=list, nullable=True)
 
     # Relationships
     properties: Mapped[List[Property]] = relationship("Property", back_populates="suburb", lazy="selectin")
     schools: Mapped[List[School]] = relationship("School", back_populates="suburb_rel", lazy="selectin")
-
-    # Many-to-many relationship for surrounding suburbs
-    surrounding_suburbs: Mapped[List[Suburb]] = relationship(
-        "Suburb",
-        secondary="suburb_surroundings",
-        primaryjoin="Suburb.id == suburb_surroundings.c.suburb_id",
-        secondaryjoin="Suburb.id == suburb_surroundings.c.surrounding_suburb_id",
-        lazy="selectin",
-    )
-
-
-# Association table for suburb surroundings
-from sqlalchemy import Table, Column, ForeignKey
-from .base import Base
-
-suburb_surroundings = Table(
-    "suburb_surroundings",
-    Base.metadata,
-    Column("suburb_id", Integer, ForeignKey("suburb.id"), primary_key=True),
-    Column("surrounding_suburb_id", Integer, ForeignKey("suburb.id"), primary_key=True),
-)

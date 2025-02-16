@@ -34,29 +34,6 @@ class PropertyAddress(BaseSchema):
     longitude: Optional[float] = None
 
 
-class PropertyEventBase(BaseSchema):
-    """Base schema for property timeline events"""
-
-    event_price: float
-    event_date: str
-    agency: Optional[str] = None
-    category: str
-    days_on_market: int
-    price_description: str
-
-
-class PropertyEventCreate(PropertyEventBase):
-    """Schema for creating property events"""
-
-    property_id: int
-
-
-class PropertyEvent(PropertyEventBase, BaseModelSchema):
-    """Schema for complete property event"""
-
-    property_id: int
-
-
 class SchoolBase(BaseSchema):
     """Base schema for school information"""
 
@@ -171,7 +148,6 @@ class PropertyInDB(PropertyBase, BaseModelSchema):
     """Schema for property in database"""
 
     id: int = Field(description="Listing ID used as primary key")
-    timeline: List[PropertyEvent] = Field(default_factory=list)
     schools: List[School] = Field(default_factory=list)
 
 

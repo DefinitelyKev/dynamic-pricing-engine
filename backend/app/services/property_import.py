@@ -2,6 +2,7 @@ from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.models.property import Property, School, property_school
+import json
 
 # from app.schemas.property import PropertyCreate, SchoolCreate
 
@@ -19,10 +20,10 @@ class PropertyImportService:
             "type": data.get("propertyType"),
             "suburb_id": data.get("suburb_id"),
             # Listing Details
-            "display_price": data.get("displayPrice"),
+            "display_price": data.get("price"),
             "listing_status": listing_summary.get("status"),
-            "listing_mode": data.get("mode"),
-            "listing_method": data.get("method"),
+            "listing_mode": listing_summary.get("mode"),
+            "listing_method": listing_summary.get("method"),
             "listing_url": data.get("listingUrl"),
             # Specifications
             "bedrooms": data.get("beds", 0),
@@ -40,8 +41,7 @@ class PropertyImportService:
             "postcode": data.get("postcode"),
             "state": data.get("state"),
             # Additional data
-            "images": data.get("images", []),
-            "schools": data.get("schools"),
+            "images": data.get("gallery", []),
         }
 
         return {k: v for k, v in transformed.items() if v is not None}

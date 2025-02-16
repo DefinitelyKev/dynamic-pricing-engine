@@ -15,7 +15,7 @@ class Suburb(BaseModel):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, index=True)
     postcode: Mapped[str] = mapped_column(String, index=True)
-    state: Mapped[str] = mapped_column(String)
+    state: Mapped[str] = mapped_column(String, nullable=True)
     suburb_profile_url: Mapped[str] = mapped_column(String, unique=True)
 
     # Demographics

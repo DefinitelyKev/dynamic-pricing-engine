@@ -1,4 +1,3 @@
-# app/services/base.py
 from typing import Generic, TypeVar, Type, Optional, List, Any
 from sqlalchemy.orm import Session
 from pydantic import BaseModel

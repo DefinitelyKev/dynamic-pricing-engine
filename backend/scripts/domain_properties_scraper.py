@@ -5,6 +5,14 @@ from httpx import AsyncClient, Response
 from parsel import Selector
 from typing import List, Dict, Optional
 import os
+import sys
+
+from import_properties import import_properties
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sqlalchemy.orm import Session
+from app.core.database import SessionLocal
 
 client = AsyncClient(
     # enable http2
@@ -113,22 +121,6 @@ def parse_hidden_data(response: Response) -> Dict:
     return data["props"]["pageProps"]["componentProps"]
 
 
-def load_existing_data() -> Dict:
-    """Load existing data from JSON file if it exists"""
-
-    if os.path.exists("domain_properties.json"):
-        with open("domain_properties.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"properties": [], "completed_price_ranges": []}
-
-
-def save_to_json(data: Dict):
-    """Save data to JSON file"""
-
-    with open("domain_properties.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
 def has_more_pages(data: Dict, page: int) -> bool:
     """Check if there are more pages of results"""
 
@@ -164,7 +156,7 @@ async def scrape_properties_for_page(property_urls: List[str], batch_size: int =
                 else:
                     print(f"Failed to fetch property {url}: Status {response.status_code}")
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.2)
 
         except Exception as e:
             print(f"Error processing batch: {e}")
@@ -173,15 +165,17 @@ async def scrape_properties_for_page(property_urls: List[str], batch_size: int =
     return page_properties
 
 
-async def process_price_range(low_price: str, high_price: str, existing_data: Dict) -> None:
+async def process_price_range(db: Session, low_price: str, high_price: str, existing_data: Dict) -> None:
     """Process all pages for a single suburb"""
 
     base_url = f"https://www.domain.com.au/sale/?ptype=house&price={low_price}-{high_price}&establishedtype=established&ssubs=0&sort=price-asc&state=nsw"
 
+    batch_data = {"properties": [], "completed_price_ranges": []}
+
     page = 1
+    print(f"\nProcessing ${low_price} - ${high_price}")
     while True:
         url = f"{base_url}&page={page}"
-        print(f"\nProcessing ${low_price} - ${high_price} - Page {page}")
 
         try:
             response = await client.get(url)
@@ -193,7 +187,7 @@ async def process_price_range(low_price: str, high_price: str, existing_data: Di
             search_results = parse_search_page(data)
 
             if not search_results:
-                print(f"No properties found on page {page} for range ${low_price} - ${high_price}")
+                print(f"No properties found for range ${low_price} - ${high_price}")
                 break
 
             # Filter out already scraped URLs
@@ -203,9 +197,9 @@ async def process_price_range(low_price: str, high_price: str, existing_data: Di
 
             if new_urls:
                 page_properties = await scrape_properties_for_page(new_urls)
-                existing_data["properties"].extend(page_properties)
-                save_to_json(existing_data)
-                print(f"Saved {len(page_properties)} new properties for range ${low_price} - ${high_price}")
+                if page_properties:
+                    batch_data["properties"].extend(page_properties)
+                    print(f"Adding {len(page_properties)} new properties - Page {page}")
 
             page += 1
 
@@ -213,25 +207,28 @@ async def process_price_range(low_price: str, high_price: str, existing_data: Di
                 print(f"No more pages for range ${low_price} - ${high_price}")
                 break
 
-            # await asyncio.sleep(1)  # Delay between pages
-
         except Exception as e:
             print(f"Error processing page {page} for range ${low_price} - ${high_price}: {e}")
             break
 
     existing_data["completed_price_ranges"].append(f"{low_price}-{high_price}")
-    save_to_json(existing_data)
+    try:
+        await import_properties(db, batch_data)
+        existing_data["properties"].extend(batch_data["properties"])
+    except Exception as import_error:
+        print(f"Error importing properties: {import_error}")
 
 
 async def run():
     try:
-        existing_data = load_existing_data()
+        existing_data = {"properties": [], "completed_price_ranges": []}
+        db = SessionLocal()
 
         low_price = 0
         for high_price in range(50000, 12000000, 50000):
-            await process_price_range(str(low_price), str(high_price), existing_data)
+            await process_price_range(db, str(low_price), str(high_price), existing_data)
             low_price = high_price
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.2)
 
         print(f"\nFinished scraping all properties. Total properties: {len(existing_data['properties'])}")
 
@@ -239,6 +236,8 @@ async def run():
         print(f"An error occurred: {e}")
     finally:
         await client.aclose()
+        if "db" in locals():
+            db.close()
 
 
 if __name__ == "__main__":

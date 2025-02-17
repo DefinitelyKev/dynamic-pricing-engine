@@ -1,145 +1,74 @@
 import os
 import sys
-import json
-import asyncio
-from typing import Dict, Any, Set
+from typing import Dict
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 # Add the parent directory to the Python path so we can import from app
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy.orm import Session
-from app.core.database import SessionLocal
 from app.models import Suburb, Property, School
 from app.services.property_import import property_import_service
 
 
-def create_suburb_from_property_data(db: Session, property_data: Dict[str, Any], created_suburbs: Set[str]) -> Suburb:
-    """Create a suburb if it doesn't exist and return it"""
-
-    # Extract suburb data from property
-    suburb_name = property_data.get("suburb")
-    suburb_postcode = property_data.get("postcode")
-    suburb_insights = property_data.get("suburbInsights", {})
-
-    if not suburb_name or not suburb_postcode:
-        raise ValueError("Missing required suburb information (name or postcode)")
-
-    if not suburb_insights:
-        raise ValueError("No suburb information found in property data")
-
-    # Create suburb key for tracking
-    suburb_key = f"{suburb_name}-{suburb_postcode}"
-
-    # Check if suburb exists in database
-    suburb = db.query(Suburb).filter_by(name=suburb_name, postcode=suburb_postcode).first()
-
-    if not suburb:
-        # Get suburb insights safely
-        suburb_insights = property_data.get("suburbInsights", {})
-        demographics = suburb_insights.get("demographics", {})
-
-        # Create new suburb
-        suburb = Suburb(
-            name=suburb_name,
-            postcode=suburb_postcode,
-            state=suburb_insights.get("state"),
-            suburb_profile_url=suburb_insights.get("suburbProfileUrl"),
-            # Demographics
-            population=demographics.get("population"),
-            avg_age_range=demographics.get("avgAge"),
-            owner_percentage=demographics.get("owners"),
-            renter_percentage=demographics.get("renters"),
-            family_percentage=demographics.get("families"),
-            single_percentage=demographics.get("singles"),
-            # Additional insights
-            median_price=suburb_insights.get("medianPrice"),
-            median_rent=suburb_insights.get("medianRentPrice"),
-            avg_days_on_market=suburb_insights.get("avgDaysOnMarket"),
-            entry_price=suburb_insights.get("entryLevelPrice"),
-            luxury_price=suburb_insights.get("luxuryLevelPrice"),
-            # Sales growth data
-            sales_growth=suburb_insights.get("salesGrowthList", {}),
-        )
-
-        db.add(suburb)
-        db.flush()
-
-        if suburb_key not in created_suburbs:
-            created_suburbs.add(suburb_key)
-
-    return suburb
-
-
-async def import_properties(file_path: str):
-    """Import properties from JSON file"""
-
-    db = SessionLocal()
-    created_suburbs = set()  # Track unique suburbs created
+async def import_properties(db: Session, data: Dict) -> None:
+    """Import properties into db from given dict"""
 
     try:
-        # Read the JSON file
-        with open(file_path, "r") as f:
-            data = json.load(f)
-            properties_data = data.get("properties", [])
+        initial_counts = {
+            "properties": db.query(Property).count(),
+            "schools": db.query(School).count(),
+            "suburbs": db.query(Suburb).count(),
+        }
 
-        # Track statistics
-        stats = {"suburbs_created": 0, "properties_imported": 0, "schools_added": 0, "errors": []}
+        errors = []
 
         # Process each property
-        for idx, property_data in enumerate(properties_data, 1):
+        for property_data in data.get("properties", []):
             try:
                 # Create or get suburb
-                suburb = create_suburb_from_property_data(db, property_data, created_suburbs)
+                suburb = property_import_service.create_or_get_suburb(db, property_data)
                 if not suburb:
                     raise ValueError("Failed to create/get suburb")
 
                 # Import property with suburb_id
                 property_data["suburb_id"] = suburb.id
                 imported_property = property_import_service.create_property_with_relations(db, property_data)
-
-                if imported_property:  # Only count if property was actually imported
-                    stats["properties_imported"] += 1
-                    stats["schools_added"] += len(property_data.get("schools", []))
-
-                # Commit every 100 properties
-                if idx % 100 == 0:
-                    db.commit()
-                    print(f"Imported {idx} properties...")
+                if not imported_property:
+                    raise ValueError("Failed to create/get property")
 
             except Exception as e:
-                stats["errors"].append({"property_id": property_data.get("propertyId"), "error": str(e)})
+                errors.append({"property_id": property_data.get("propertyId"), "error": str(e)})
                 print(f"Error importing property {property_data.get('propertyId')}: {str(e)}")
                 continue
-
-        # Update suburbs created count
-        stats["suburbs_created"] = len(created_suburbs)
 
         # Final commit
         db.commit()
 
-        # Print results
-        print("\nImport completed!")
-        print(f"Suburbs created: {stats['suburbs_created']}")
-        print(f"Properties imported: {stats['properties_imported']}")
-        print(f"Schools added: {stats['schools_added']}")
-        print(f"Errors encountered: {len(stats['errors'])}")
+        final_counts = {
+            "properties": db.query(Property).count(),
+            "schools": db.query(School).count(),
+            "suburbs": db.query(Suburb).count(),
+        }
 
-        if stats["errors"]:
+        # Print results
+        print(f"\nSuburbs created: {final_counts['suburbs'] - initial_counts['suburbs']}")
+        print(f"Properties imported: {final_counts['properties'] - initial_counts['properties']}")
+        print(f"Schools added: {final_counts['schools'] - initial_counts['schools']}")
+        print(f"Errors encountered: {len(errors)}")
+
+        if errors:
             print("\nErrors:")
-            for error in stats["errors"]:
+            for error in errors:
                 print(f"Property {error['property_id']}: {error['error']}")
 
+    except SQLAlchemyError as e:
+        print(f"Database error: {str(e)}")
+        db.rollback()
+        raise
     except Exception as e:
         print(f"Fatal error: {str(e)}")
         db.rollback()
         raise
     finally:
         db.close()
-
-
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python import_properties.py <path_to_json_file>")
-        sys.exit(1)
-
-    asyncio.run(import_properties(sys.argv[1]))

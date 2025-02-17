@@ -5,7 +5,6 @@ from datetime import datetime
 from .base import BaseSchema, BaseModelSchema
 
 if TYPE_CHECKING:
-    from .pricing import PriceAdjustment
     from .suburb import SuburbInDB
 
 
@@ -155,6 +154,5 @@ class Property(PropertyInDB):
     """Schema for complete property with all relationships"""
 
     suburb: Optional["SuburbInDB"] = None
-    price_adjustments: List["PriceAdjustment"] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
